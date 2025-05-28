@@ -1,4 +1,4 @@
-import neptune as neptune
+import neptune
 import argparse
 import json
 import itertools
@@ -32,7 +32,7 @@ from sklearn.model_selection import train_test_split
 import torch.nn as nn
 import torch.nn.functional as F
 device = torch.device("cpu")#"cuda:0" if torch.cuda.is_available() else "cpu")
-print(device)
+print(f"Device: {device}")
 torch.manual_seed(0)
 
 
@@ -41,7 +41,7 @@ parser.add_argument("--exp-index", type=str, help="id of experiment", default=0)
 
 args = parser.parse_args()
 exp_num = int(args.exp_index)
-print(exp_num)
+print(f"Exp number: {exp_num}")
 
 f = open("hyperparameters.json")
 exp_hyperparams = json.load(f)
@@ -64,7 +64,7 @@ for key in keys:
 
 all_possibilities = make_all_possibilities(list_possibilities)
 experiment = all_possibilities[exp_num]
-print(experiment)
+print(f"Experiment: {experiment}")
 
 
 run = neptune.init_run(
@@ -72,6 +72,8 @@ run = neptune.init_run(
     api_token="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiIzNzQ4OWYzOC1jYzIzLTQ1NjEtOTliNC1jZmRmYTlmZjE3M2QifQ==",
     mode="offline",
 )  # your credentials
+
+
 
 ### PARAMETERS
 Nz = 512 # number of discrete heights
@@ -88,7 +90,7 @@ A_simu = None
 az_out_sel = 115
 
 yue = scipy.io.loadmat('./biosar_profile_az116.mat', squeeze_me=True)#, simplify_cells=True)
-print(yue.keys())
+print(f"Ref profile data keys: {yue.keys()}")
 
 Tomo_SP_CP = yue['Tomo_SP_CP']
 az_out_sel = yue['az_out_sel']-1 # matlab to python conversion
@@ -97,7 +99,7 @@ rg_out_camp = yue['rg_out_camp']-1
 spec_wv = yue['spec_wv']
 
 mat = scipy.io.loadmat('./Biosar2_L_band_demo_data.mat', squeeze_me=True)#, simplify_cells=True) ## for newer scipy versions
-print(mat.keys())
+print(f"BioSAR2 data keys: {mat.keys()}")
 
 kz = mat['kz']
 k = mat['k']
@@ -136,7 +138,7 @@ def conv2(x, y, mode='same'):
 
 def generate_covariance_matrix(F, x_ax, y_ax, Wx, Wy):
     Ny, Nx, N = F.shape
-    # pixel sampling
+    # pixel sampling for meter spaced ax
     dx = x_ax[1] - x_ax[0]
     dy = y_ax[1] - y_ax[0]
 
@@ -148,22 +150,25 @@ def generate_covariance_matrix(F, x_ax, y_ax, Wx, Wy):
     mean_filter_mask = np.ones((int(2*Ly+1), int(2*Lx+1)))/((2*Lx+1)*(2*Ly+1)) # 2*+1 for odd box
 
     Cov = np.ones((Ny, Nx, N, N), dtype=complex)
+    Corr = np.ones((Ny, Nx, N, N), dtype=complex)
 
     for n in range(N):
         In = F[:,:,n]
-        Cnn = conv2(In * np.conjugate(In), mean_filter_mask, mode='same')
+        Cnn = scipy.signal.convolve2d(In * np.conjugate(In), mean_filter_mask, mode='same')
 
         for m in range(n, N):
             Im = F[:,:,m]
-            Cmm = conv2(Im * np.conjugate(Im), mean_filter_mask, mode='same')
-            Cnm = conv2(In * np.conjugate(Im), mean_filter_mask, mode='same')
-
+            Cmm = scipy.signal.convolve2d(Im * np.conjugate(Im), mean_filter_mask, mode='same')
+            Cnm = scipy.signal.convolve2d(In * np.conjugate(Im), mean_filter_mask, mode='same')
+            
             # coherence
-            coe = Cnm / np.sqrt(Cnn*Cmm)
-            Cov[:, :, n, m] = coe
-            Cov[:, :, m, n] = np.conj(coe)
-
-    return Cov
+            coe = Cnm / np.sqrt(Cnn*Cmm + 10e-15)
+            Cov[:, :, n, m] = Cnm
+            Cov[:, :, m, n] = np.conj(Cnm)
+            Corr[:, :, n, m] = coe
+            Corr[:, :, m, n] = np.conj(coe)
+                
+    return Cov, Corr
 
 def display_COV(COV):
     ni, nj, n, _ = COV.shape
@@ -175,17 +180,15 @@ def display_COV(COV):
     plt.imshow(np.abs(COV_display))
     
     
-Wrg = 8 #15
-Waz = 17 #30
+Wrg = exp_hyperparams["Wrg"][int(experiment[keys.index("Wrg")])]
+Waz = exp_hyperparams["Waz"][int(experiment[keys.index("Waz")])]
 t = time()
-Cov_def = generate_covariance_matrix(I_interp, az_ax, rg_ax, Waz, Wrg)
-print(time() - t)
-print('Done')   
+Cov_def, _ = generate_covariance_matrix(I_interp, az_ax, rg_ax, Waz, Wrg)
+print(f"Covariance computed in: {time() - t}")
   
 
 # LiDAR filtering
 dem = scipy.io.loadmat('./L_band_SW_DEM_CHM_sub.mat', squeeze_me=True)#, simplify_cells=True) ## for newer scipy versions
-print(dem.keys())
 CHM = dem['CHM']
 DTM = dem['DTM']
 az_ax_dem = dem['az_ax']
@@ -197,7 +200,6 @@ mean_filter_mask = np.ones((int(2*Laz+1), int(2*Lrg+1)))/((2*Lrg+1)*(2*Laz+1))
 
 SR_CHM_filtered = scipy.signal.convolve2d(CHM, mean_filter_mask, mode='same')
 SR_DTM_filtered = scipy.signal.convolve2d(DTM, mean_filter_mask, mode='same')
-print(SR_CHM_filtered.shape)
 
 
 def bf(COV, kz, az_selected):
@@ -252,7 +254,7 @@ for i in range(Nsamples):
   pdf, param = create_p_sample2(z)
   p.append(pdf)
   parameters.append(param)
-print('Time taken: ', time() - t0)
+print(f"Time taken for profile simulation: {time() - t0}")
 
 # normalisation - to obtain APA normalised
 p_norm = np.transpose(np.asarray(p)/np.sum(p, axis=1).reshape(-1, 1))
@@ -270,8 +272,6 @@ def geometry_simulation(z, kz, Nsamples, random_seed):
   return np.asarray(A), r_a_coord
 
 A_simu, r_a_coord = geometry_simulation(z, kz_interp, Nsamples, random_seed)
-print(A_simu.shape)
-
 
 def create_z_samples(p, A, Nlook, epsilon):
   # create independent samples from theoretic p profiles
@@ -289,7 +289,7 @@ def create_z_samples(p, A, Nlook, epsilon):
 # create independent samples from theoretic p profiles
 t0 = time()
 zsim = create_z_samples(p_norm, A_simu, Nlook, epsilon)
-print(time() - t0)
+print(f"Time taken to simulate measures: {time() - t0}")
 
 # compute correlation
 def simulated_correlation(zsim, W):
@@ -473,7 +473,6 @@ testloader = DataLoader(dataset=Data(X_test, Y_test, indices_test), batch_size=b
 print(f"Shape of data: {data.X.shape}")
 
 
-
 # Neural network architecture
 class Net(nn.Module):
     def __init__(self, input, H1, H2, H3, H4, H5, H6, H7, output):
@@ -539,10 +538,12 @@ net_comp.eval()
 # Training  - FINAL NORMALIZED translations Nz/16 normal
 torch.manual_seed(0)
 stime = time()
-nb_epochs = 100
+nb_epochs = exp_hyperparams["nb_epochs"][int(experiment[keys.index("nb_epochs")])]
+# nb_epochs = 100
 alpha = exp_hyperparams["alpha"][int(experiment[keys.index("alpha")])]
 epsilon = 1e-1 # thermal noise
 stretch = T.TimeStretch(n_freq=1).to(device)
+pos_0 = 128
 
 losses = []
 losses1 = []
