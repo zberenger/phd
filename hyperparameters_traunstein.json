@@ -1,0 +1,10 @@
+{
+    "learning_rate": [0.001],
+    "nb_epochs": [100],
+    "alpha": [0.01],
+    "interp_goal": ["None"],
+    "train_mode": ["supervised"],
+    "Wrg": [9],
+    "Waz": [9],
+    "batch_size": [64]
+}

@@ -1,0 +1,13 @@
+*.npy
+*.npy.gz
+17SARTOM/
+Traunstein_lidar_4Zoe/
+.neptune/
+jouet.ipynb
+*.txt
+
+ei_real_slc_100.pth
+nn_REI_12.ipynb
+Biosar2_L_band_demo_data.mat
+Paracou_demo_data_wDTM_v7.mat
+Traunstein.ipynb
