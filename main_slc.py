@@ -550,7 +550,7 @@ while epoch < nb_epochs:
     # compute the transformations
     A_tensor = torch.tensor(A_training[indices_inputs], dtype=torch.cfloat, device=device)
     scale = np.random.uniform(0.1, 1.3, len(output))
-    trans_bool = np.random.randint(0, 2, len(output))
+    trans_bool = np.random.randint(0, 3, len(output))
     x2_tmp = torch.zeros(len(output), Nz, dtype=torch.cfloat, device=device)
     for k in range(len(output)):
       if trans_bool[k]:
@@ -559,6 +559,8 @@ while epoch < nb_epochs:
           x2_tmp[k][pos_0-int(pos_0*(int(np.ceil(Nz*scale[k])))/Nz):pos_0+(int(np.ceil(Nz*scale[k])))-int(pos_0*(int(np.ceil(Nz*scale[k])))/Nz)] = stretch((output[k]+1e-15).type(torch.cfloat), 1./scale[k])
         else:
           x2_tmp[k] = stretch((output[k]+1e-15).type(torch.cfloat), 1/scale[k])[int(pos_0*int(np.ceil(Nz*scale[k]))/Nz)-pos_0:int(pos_0*int(np.ceil(Nz*scale[k]))/Nz)+Nz-pos_0]
+        if trans_bool[k]==2:
+          x2_tmp[k] = torch.roll(x2_tmp[k], int(np.random.normal(0, 0.25*Nz/16)))
       else:
         # translation
         # tmp = np.random.randint(int(Nz/16))-10
@@ -612,8 +614,6 @@ while epoch < nb_epochs:
     #                                     for k in range(len(inputs))]
     # loss1 = (torch.sum(torch.stack([torch.square(torch.linalg.norm(corr_loss[k] - R_tensor[k], ord='fro'))
     #                                     for k in range(len(inputs))])))
-    # loss2 = alpha * torch.sum(torch.square(torch.linalg.norm(10*torch.log10(x3+1e-2) - 10*torch.log10(x2+1e-2), ord=2, dim=1)))
-    # loss = loss1 + loss2
     cov_loss = torch.matmul(torch.matmul(A_tensor, torch.diag_embed(output).cfloat()),
                             torch.transpose(torch.conj(A_tensor), 1, 2)) + epsilon * torch.eye(Nim, dtype=torch.cfloat, device=device).reshape((1, Nim, Nim)).repeat(output.shape[0], 1, 1)
     corr_loss = torch.matmul(torch.matmul(torch.diag_embed(1./torch.sqrt(torch.diagonal(cov_loss, dim1=-2, dim2=-1)+1e-5)), cov_loss),
@@ -635,7 +635,7 @@ while epoch < nb_epochs:
     # for name, param in net.named_parameters():
     # # print(param)
     #   print(name, param.grad.norm())
-
+  
   print(f'[{epoch + 1}] Train loss: {running_loss/nb_loss:.7f}; Data attachment: {running_loss1/nb_loss:.7f}; Regularization: {running_loss2/nb_loss:.7f}; Time: {time()-stime:.7f}')
   
   if epoch%(nb_epochs//max(min(20, nb_epochs//2), 1)) == 0:

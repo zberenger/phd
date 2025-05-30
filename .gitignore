@@ -5,6 +5,7 @@ Traunstein_lidar_4Zoe/
 .neptune/
 jouet.ipynb
 *.txt
+__pycache__/
 
 ei_real_slc_100.pth
 nn_REI_12.ipynb

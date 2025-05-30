@@ -573,22 +573,21 @@ while epoch < nb_epochs:
     A_tensor = torch.tensor(A_simu[indices_inputs], dtype=torch.cfloat, device=device)
 
     # net dilation 
-    scale = 1.0/np.random.uniform(0.1, 1.3, len(output)) # for net
-    X_comp = torch.cat((output, torch.from_numpy(scale.reshape(-1,1).astype(np.float32))), dim=1)
-    X_dilated = net_comp(X_comp)
-    # scale = np.random.uniform(0.1, 1.3, len(output)) # for stretch
+    # scale = 1.0/np.random.uniform(0.1, 1.3, len(output)) # for net
+    # X_comp = torch.cat((output, torch.from_numpy(scale.reshape(-1,1).astype(np.float32))), dim=1)
+    # X_dilated = net_comp(X_comp)
+    scale = np.random.uniform(0.1, 1.3, len(output)) # for stretch
     trans_bool = np.random.randint(0, 3, len(output))
     x2_tmp = torch.zeros(len(output), Nz, dtype=torch.cfloat, device=device)
     for k in range(len(output)):
       if trans_bool[k]:
-        # # dilation with stretch
-        # if scale[k]<1.0:
-        #   x2_tmp[k][128-int(128*(int(np.ceil(Nz*scale[k])))/Nz):128+(int(np.ceil(Nz*scale[k])))-int(128*(int(np.ceil(Nz*scale[k])))/Nz)] = stretch(output[k], 1./scale[k])
-        # else:
-        #   x2_tmp[k] = stretch(output[k], 1/scale[k])[int(128*int(np.ceil(Nz*scale[k]))/Nz)-128:int(128*int(np.ceil(Nz*scale[k]))/Nz)+Nz-128]
-        
-        # dilation with net
-        x2_tmp[k] = X_dilated[k]
+        # dilation with stretch
+        if scale[k]<1.0:
+          x2_tmp[k][pos_0-int(pos_0*(int(np.ceil(Nz*scale[k])))/Nz):pos_0+(int(np.ceil(Nz*scale[k])))-int(pos_0*(int(np.ceil(Nz*scale[k])))/Nz)] = stretch((output[k]+1e-15).type(torch.cfloat), 1./scale[k])
+        else:
+          x2_tmp[k] = stretch((output[k]+1e-15).type(torch.cfloat), 1/scale[k])[int(pos_0*int(np.ceil(Nz*scale[k]))/Nz)-pos_0:int(pos_0*int(np.ceil(Nz*scale[k]))/Nz)+Nz-pos_0]
+        # # dilation with net
+        # x2_tmp[k] = X_dilated[k]
 
         if trans_bool[k]==2:
           x2_tmp[k] = torch.roll(x2_tmp[k], int(np.random.normal(0, 0.25*Nz/16)))
@@ -596,17 +595,23 @@ while epoch < nb_epochs:
         # translation
         # tmp = np.random.randint(int(Nz/16))-10
         # x2[k] = output[k] @ (torch.diag(torch.ones(Nz-abs(tmp), device=device), diagonal=tmp) + torch.diag(torch.ones(abs(tmp), device=device), diagonal=np.sign(tmp)*(abs(tmp)-Nz))) # reversible
-        x2_tmp[k] = torch.roll(output[k], int(np.random.normal(0, 0.25*Nz/16)))
+        scale[k] = int(np.random.normal(0, 0.25*Nz/16))
+        x2_tmp[k] = torch.roll(output[k], int(scale[k]))
 
-
-    x2 = torch.stack([x2_tmp[k]/torch.sum(x2_tmp[k]+1e-5) for k in range(len(output))])
-    zsim_tmp = torch.stack([A_tensor[k] @ torch.diag(torch.sqrt(x2[k]+1e-15)).cfloat() @
-                           (torch.randn(Nz, Nlook, device=device) +
-                            1j*torch.randn(Nz, Nlook, device=device))/np.sqrt(2) +
-                            np.sqrt(epsilon)*(torch.randn(Nim, Nlook, device=device) +
-                                              1j*torch.randn(Nim, Nlook, device=device))/np.sqrt(2)
-                            for k in range(len(output))])
-    cov_tmp = torch.stack([zsim_tmp[k] @ torch.transpose(torch.conj(zsim_tmp[k]), 0, 1) / Nlook
+    x2 = x2_tmp/(torch.sum(x2_tmp + 1e-5, axis=1))[..., None]
+    # x2 = torch.stack([x2_tmp[k]/torch.sum(x2_tmp[k]+1e-5) for k in range(len(output))])
+    # zsim_tmp = torch.stack([A_tensor[k] @ torch.diag(torch.sqrt(x2[k]+1e-15)).cfloat() @
+    #                        (torch.randn(Nz, Nlook, device=device) +
+    #                         1j*torch.randn(Nz, Nlook, device=device))/np.sqrt(2) +
+    #                         np.sqrt(epsilon)*(torch.randn(Nim, Nlook, device=device) +
+    #                                           1j*torch.randn(Nim, Nlook, device=device))/np.sqrt(2)
+    #                         for k in range(len(output))])
+    zsim_tmp = torch.matmul(torch.matmul(A_tensor, torch.diag_embed(torch.sqrt(x2 + 1e-5))),
+                           (torch.randn(A_tensor.shape[0], Nz, Nsimu, device=device) +
+                            1j*torch.randn(A_tensor.shape[0], Nz, Nsimu, device=device)) /
+                            np.sqrt(2)) + np.sqrt(epsilon)*(torch.randn(A_tensor.shape[0], Nim, Nsimu, device=device) +
+                                              1j*torch.randn(A_tensor.shape[0], Nim, Nsimu, device=device))/np.sqrt(2)
+    cov_tmp = torch.stack([zsim_tmp[k] @ torch.transpose(torch.conj(zsim_tmp[k]), 0, 1) / Nlook ## TODO
                         for k in range(len(output))])
     diag_tmp = torch.stack([torch.diag(1./torch.sqrt(torch.diag(cov_tmp[k])))
                             for k in range(len(output))])
@@ -626,12 +631,17 @@ while epoch < nb_epochs:
     #                                                   torch.transpose(torch.conj(A_tensor[k]), 0, 1) - R_tensor[k], ord='fro')
     #                                 for k in range(len(inputs))])))
     # losses on network outputs
-    cov_loss = [A_tensor[k] @ torch.diag(output[k]).cfloat() @ torch.transpose(torch.conj(A_tensor[k]), 0, 1) + epsilon * torch.eye(Nim)
-                                        for k in range(len(inputs))]
-    corr_loss = [torch.diag(1./torch.sqrt(torch.diag(cov_loss[k])+1e-15)) @ cov_loss[k] @ torch.diag(1./torch.sqrt(torch.diag(cov_loss[k])+1e-15))
-                                        for k in range(len(inputs))]
-    loss1 = (torch.sum(torch.stack([torch.square(torch.linalg.norm(corr_loss[k] - R_tensor[k], ord='fro'))
-                                        for k in range(len(inputs))])))
+    # cov_loss = [A_tensor[k] @ torch.diag(output[k]).cfloat() @ torch.transpose(torch.conj(A_tensor[k]), 0, 1) + epsilon * torch.eye(Nim)
+    #                                     for k in range(len(inputs))]
+    # corr_loss = [torch.diag(1./torch.sqrt(torch.diag(cov_loss[k])+1e-15)) @ cov_loss[k] @ torch.diag(1./torch.sqrt(torch.diag(cov_loss[k])+1e-15))
+    #                                     for k in range(len(inputs))]
+    # loss1 = (torch.sum(torch.stack([torch.square(torch.linalg.norm(corr_loss[k] - R_tensor[k], ord='fro'))
+    #                                     for k in range(len(inputs))])))
+    cov_loss = torch.matmul(torch.matmul(A_tensor, torch.diag_embed(output).cfloat()),
+                            torch.transpose(torch.conj(A_tensor), 1, 2)) + epsilon * torch.eye(Nim, dtype=torch.cfloat, device=device).reshape((1, Nim, Nim)).repeat(output.shape[0], 1, 1)
+    corr_loss = torch.matmul(torch.matmul(torch.diag_embed(1./torch.sqrt(torch.diagonal(cov_loss, dim1=-2, dim2=-1)+1e-5)), cov_loss),
+                             torch.diag_embed(1./torch.sqrt(torch.diagonal(cov_loss, dim1=-2, dim2=-1)+1e-5)))
+    loss1 = (torch.sum(torch.square(torch.linalg.norm(corr_loss - R_tensor, ord='fro', dim=(-1, -2)))))
     loss2 = alpha * torch.sum(torch.square(torch.linalg.norm(10*torch.log10(x3+1e-2) - 10*torch.log10(x2+1e-2), ord=2, dim=1)))
     loss = loss1 + loss2
 
@@ -643,14 +653,13 @@ while epoch < nb_epochs:
     running_loss1 += loss1.item()
     running_loss2 += loss2.item()
     nb_loss += 1
-    
+  
   print(f'[{epoch + 1}] Train loss: {running_loss/nb_loss:.7f}; Data attachment: {running_loss1/nb_loss:.7f}; Regularization: {running_loss2/nb_loss:.7f}; Time: {time()-stime:.7f}')
-
-
-  if epoch%(nb_epochs//min(20, nb_epochs//2)) == 0:
+  
+  if epoch%(nb_epochs//max(min(20, nb_epochs//2), 1)) == 0:
     # test loss
     with torch.no_grad():
-      # calculate outputs by running matrices through the network
+      # calculate outputs by running matrices through the network ## LAAAAAA
       outputs_test, _ = net(X_test.reshape((X_test.shape[0], -1)).to(device))
 
       # compute the transformations
