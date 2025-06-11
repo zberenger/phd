@@ -1,4 +1,5 @@
 import neptune
+from neptune.utils import stringify_unsupported
 import argparse
 import json
 import itertools
@@ -753,7 +754,7 @@ while epoch < nb_epochs:
     fig.tight_layout()
     plt.legend()
     # plt.show()
-            
+
     run[f"training_val/{epoch + 1}"].upload(fig)
     plt.close()
 
@@ -761,21 +762,6 @@ while epoch < nb_epochs:
 
 total_time = time() - stime
 print(f'Finished Training at epoch number {epoch} in {total_time} seconds')
-
-
-
-# save model real EI 100
-# torch.save({
-#     'epoch': epoch,
-#     'model_state_dict': net.state_dict(),
-#     'optimizer_state_dict': optimizer.state_dict(),
-#     'train_loss': losses,
-#     'train_loss_att': losses1,
-#     'train_loss_reg': losses2,
-#     'val_loss': test_losses,
-#     'val_loss_att': test_losses1,
-#     'val_loss_reg': test_losses2,
-# }, './ei_real_slc_100.pth')
 
 
 print(0)
@@ -943,17 +929,27 @@ plt.colorbar(im,fraction=0.046, pad=0.01)
 run[f"results/bf_def_predicted_log_dem"].upload(fig)
 plt.close()
 
+# save model real EI 100
+# torch.save({
+#     'epoch': epoch,
+#     'model_state_dict': net.state_dict(),
+#     'optimizer_state_dict': optimizer.state_dict(),
+#     'train_loss': losses,
+#     'train_loss_att': losses1,
+#     'train_loss_reg': losses2,
+#     'val_loss': test_losses,
+#     'val_loss_att': test_losses1,
+#     'val_loss_reg': test_losses2,
+# }, './ei_real_slc_100.pth')
 
 print(4)
 params = {
-    "rg_out_camp": rg_out_camp,
     "az_out_sel": az_out_sel,
     "interp_goal": interp_goal,
     "test_size": test_size,
     "batch_size": batch_size,
     "alpha": alpha,
     "learning_rate": learning_rate,
-    "net_parameters": net.parameters,
     "nb_epochs": nb_epochs,
     "epsilon": epsilon,
     "Wrg": Wrg,
@@ -961,21 +957,23 @@ params = {
 }
 
 run["parameters"] = params
-run["parameters/az_ax"].extend(az_ax.tolist())
-run["parameters/rg_ax"].extend(rg_ax.tolist())
+run["parameters/rg_out_camp"] = stringify_unsupported(rg_out_camp)
+run["parameters/net_parameters"] = stringify_unsupported(net.parameters)
+run["parameters/az_ax"] = stringify_unsupported(az_ax)
+run["parameters/rg_ax"] = stringify_unsupported(rg_ax)
 
 results = {
     "total_time_training": total_time
 }
 
 run["results/arrays"] = results
-run["results/losses"].extend(losses)
-run["results/losses_att"].extend(losses1)
-run["results/losses_reg"].extend(losses2)
-run["results/test_losses"].extend(test_losses)
-run["results/test_losses_att"].extend(test_losses1)
-run["results/test_losses_reg"].extend(test_losses2)
-run["results/bf_def_predicted"].extend(bf_def_predicted.reshape(-1).tolist())
+run["results/losses"] = stringify_unsupported(losses)
+run["results/losses_att"] = stringify_unsupported(losses1)
+run["results/losses_reg"] = stringify_unsupported(losses2)
+run["results/test_losses"] = stringify_unsupported(test_losses)
+run["results/test_losses_att"] = stringify_unsupported(test_losses1)
+run["results/test_losses_reg"] = stringify_unsupported(test_losses2)
+run["results/bf_def_predicted"] = stringify_unsupported(bf_def_predicted)
 
 
 run.stop()

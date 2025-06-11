@@ -1,4 +1,5 @@
 import neptune
+from neptune.utils import stringify_unsupported
 import argparse
 import json
 import itertools
@@ -631,7 +632,7 @@ while epoch < nb_epochs:
     #                                                   torch.transpose(torch.conj(A_tensor[k]), 0, 1) - R_tensor[k], ord='fro')
     #                                 for k in range(len(inputs))])))
     # losses on network outputs
-    # cov_loss = [A_tensor[k] @ torch.diag(output[k]).cfloat() @ torch.transpose(torch.conj(A_tensor[k]), 0, 1) + epsilon * torch.eye(Nim)
+    # cov_loss = [A_tensor[k] @ torch.diag(output[k]).cfloat() @ torch.transpose(torch.conj(A_tensor[k]), 0, 1) + epsilon * torch.eye(Nim, device=device)
     #                                     for k in range(len(inputs))]
     # corr_loss = [torch.diag(1./torch.sqrt(torch.diag(cov_loss[k])+1e-15)) @ cov_loss[k] @ torch.diag(1./torch.sqrt(torch.diag(cov_loss[k])+1e-15))
     #                                     for k in range(len(inputs))]
@@ -659,20 +660,21 @@ while epoch < nb_epochs:
   if epoch%(nb_epochs//max(min(20, nb_epochs//2), 1)) == 0:
     # test loss
     with torch.no_grad():
-      # calculate outputs by running matrices through the network ## LAAAAAA
-      outputs_test, _ = net(X_test.reshape((X_test.shape[0], -1)).to(device))
+      for j, (X_test_b, _, indices_test_b) in enumerate(testloader, 0):
+        # calculate outputs by running matrices through the network ## LAAAAAA
+        outputs_test, _ = net(X_test_b.reshape((X_test_b.shape[0], -1)).to(device))
 
-      # compute the transformations
-      A_tensor_test = torch.tensor(A_simu[indices_test], dtype=torch.cfloat, device=device)
+        # compute the transformations
+        A_tensor_test = torch.tensor(A_simu[indices_test_b], dtype=torch.cfloat, device=device)
 
-      # transformation
-      scale_test = 1.0/np.random.uniform(0.1, 1.5, len(outputs_test))
-      X_comp_test = torch.cat((outputs_test, torch.from_numpy(scale_test.reshape(-1,1).astype(np.float32))), dim=1)
-      X_dilated_test = net_comp(X_comp_test)
-      # scale_test = np.random.uniform(0.1, 1.5, len(outputs_test))
-      trans_bool_test = np.random.randint(0, 3, len(outputs_test))
+        # transformation
+        scale_test = 1.0/np.random.uniform(0.1, 1.5, len(outputs_test))
+        X_comp_test = torch.cat((outputs_test, torch.from_numpy(scale_test.reshape(-1,1).astype(np.float32))), dim=1)
+        X_dilated_test = net_comp(X_comp_test)
+        # scale_test = np.random.uniform(0.1, 1.5, len(outputs_test))
+        trans_bool_test = np.random.randint(0, 3, len(outputs_test))
 
-      x2_test = torch.zeros(len(outputs_test), Nz, dtype=torch.cfloat, device=device)
+        x2_test = torch.zeros(len(outputs_test), Nz, dtype=torch.cfloat, device=device)
       for k in range(len(outputs_test)):
         if trans_bool_test[k]:
           # # dilation with stretch
@@ -729,7 +731,7 @@ while epoch < nb_epochs:
       test_losses2.append(test_loss2.item())
 
     # train loss
-    if epoch%(nb_epochs//min(20, nb_epochs//2)) == 0:
+    if epoch%(nb_epochs//max(min(20, nb_epochs//2), 1)) == 0:
       print(f'[{epoch + 1}, {i + 1:5d}] Train loss: {running_loss/nb_loss:.7f}; Data attachment: {running_loss1/nb_loss:.7f}; Regularization: {running_loss2/nb_loss:.7f}; Test loss: {test_loss.item():.7f}; Time: {time()-stime:.7f}')
     losses.append(running_loss/nb_loss)
     losses1.append(running_loss1/nb_loss)
@@ -738,22 +740,21 @@ while epoch < nb_epochs:
     running_loss1 = 0.0
     running_loss2 = 0.0
 
-  if epoch%(nb_epochs//min(20, nb_epochs//2)) == 0:
+  if epoch%(nb_epochs//max(min(20, nb_epochs//2), 1)) == 0:
     # plot results
     fig, axs = plt.subplots(3,4,figsize=(15,10),sharey=True)
     for i in range(12):
       idx = np.random.randint(len(inputs))
       # plot prediction
-      axs[i%3,i%4].plot(labels[idx].cpu().detach().numpy(), color='tab:orange', label='ground truth')
-      axs[i%3,i%4].plot(output[idx].cpu().detach().numpy(), color='tab:blue', label='predicted')
+      axs[i%3,i%4].plot(z, labels[idx].cpu().detach().numpy(), color='tab:orange', label='ground truth')
+      axs[i%3,i%4].plot(z, output[idx].cpu().detach().numpy(), color='tab:blue', label='predicted')
 
     fig.tight_layout()
     plt.legend()
-    #plt.show()
-    
+    # plt.show()
+
     run[f"training_val/{epoch + 1}"].upload(fig)
     plt.close()
-    
 
   epoch += 1
 
@@ -927,42 +928,37 @@ plt.close()
 
 # np.savetxt('X_test.txt', X_test.cpu().detach().numpy())
 
-print('TV2')
-print('TV2')
-print('TV2')
-
-
 params = {
-    "rg_out_camp": rg_out_camp,
     "az_out_sel": az_out_sel,
     "interp_goal": interp_goal,
     "test_size": test_size,
     "batch_size": batch_size,
     "alpha": alpha,
     "learning_rate": learning_rate,
-    "net_parameters": net.parameters,
     "nb_epochs": nb_epochs,
     "epsilon": epsilon,
 }
 
 run["parameters"] = params
-run["parameters/az_ax"].extend(az_ax.tolist())
-run["parameters/rg_ax"].extend(rg_ax.tolist())
+run["parameters/rg_out_camp"] = stringify_unsupported(rg_out_camp)
+run["parameters/net_parameters"] = stringify_unsupported(net.parameters)
+run["parameters/az_ax"] = stringify_unsupported(az_ax)
+run["parameters/rg_ax"] = stringify_unsupported(rg_ax)
 
 results = {
     "total_time_training": total_time
 }
 
 run["results/arrays"] = results
-run["results/losses"].extend(losses)
-run["results/losses_att"].extend(losses1)
-run["results/losses_reg"].extend(losses2)
-run["results/test_losses"].extend(test_losses)
-run["results/test_losses_att"].extend(test_losses1)
-run["results/test_losses_reg"].extend(test_losses2)
-run["results/bf_def_predicted"].extend(bf_def_predicted.reshape(-1).tolist())
+run["results/losses"] = stringify_unsupported(losses)
+run["results/losses_att"] = stringify_unsupported(losses1)
+run["results/losses_reg"] = stringify_unsupported(losses2)
+run["results/test_losses"] = stringify_unsupported(test_losses)
+run["results/test_losses_att"] = stringify_unsupported(test_losses1)
+run["results/test_losses_reg"] = stringify_unsupported(test_losses2)
+run["results/bf_def_predicted"] = stringify_unsupported(bf_def_predicted)
 
-    
+
 run.stop()
 
 
